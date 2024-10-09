@@ -1,0 +1,86 @@
+
+
+```
+bash
+#!/bin/bash
+
+# Email account settings
+IMAP_SERVER="your_imap_server"
+IMAP_USERNAME="your_email_address"
+IMAP_PASSWORD="your_email_password"
+IMAP_FOLDER="INBOX"
+DOWNLOAD_DIR="/path/to/download/directory"
+
+# IMAP connection settings
+IMAP_PORT=993
+IMAP_SSL=true
+
+# Log file
+LOG_FILE="email_downloader.log"
+
+# Function to log messages
+log_message() {
+  echo "$(date) - $1" >> "$LOG_FILE"
+}
+
+# Function to download files from URLs
+download_file() {
+  local url="$1"
+  local filename="$(basename "$url")"
+  log_message "Downloading $url to $DOWNLOAD_DIR/$filename"
+  curl -o "$DOWNLOAD_DIR/$filename" "$url" || log_message "Error downloading $url"
+}
+
+# Function to mark email as read
+mark_email_read() {
+  local email_id="$1"
+  log_message "Marking email $email_id as read"
+  imapfetch -u "$IMAP_USERNAME" -p "$IMAP_PASSWORD" -s "$IMAP_SERVER" -f "$IMAP_FOLDER" \
+    -c "store $email_id +FLAGS (\\Seen)" || log_message "Error marking email $email_id as read"
+}
+
+# Main script
+log_message "Script started"
+
+# Connect to IMAP server
+if [ "$IMAP_SSL" = true ]; then
+  IMAP_CONNECTION="imap://$IMAP_USERNAME:$IMAP_PASSWORD@$IMAP_SERVER:$IMAP_PORT/$IMAP_FOLDER"
+else
+  IMAP_CONNECTION="imaps://$IMAP_USERNAME:$IMAP_PASSWORD@$IMAP_SERVER:$IMAP_PORT/$IMAP_FOLDER"
+fi
+
+# Search for unseen emails
+imapfetch -u "$IMAP_USERNAME" -p "$IMAP_PASSWORD" -s "$IMAP_SERVER" -f "$IMAP_FOLDER" \
+  -c "search unseen" | while read -r email_id; do
+  # Extract URL from email body
+  url=$(imapfetch -u "$IMAP_USERNAME" -p "$IMAP_PASSWORD" -s "$IMAP_SERVER" -f "$IMAP_FOLDER" \
+    -c "fetch $email_id body" | grep -oE 'https?://[^[:space:]]+')
+  
+  # Download file and mark email as read
+  download_file "$url"
+  mark_email_read "$email_id"
+done
+
+log_message "Script finished"
+```
+
+To save this script as a file:
+
+1. Copy the script.
+2. Open a text editor (e.g., Notepad, TextEdit, Sublime Text).
+3. Paste the script.
+4. Save as `email_downloader.sh` (or your preferred filename).
+5. Give execute permissions with `chmod +x email_downloader.sh`.
+
+To run the script:
+
+1. Open a terminal.
+2. Navigate to the script's directory.
+3. `./email_downloader.sh`.
+
+To schedule the script:
+
+1. Open your system's cron job editor (`crontab -e`).
+2. Add `*/5 * * * * /path/to/email_downloader.sh`.
+
+Replace `your_imap_server`, `your_email_address`, `your_email_password`, and `/path/to/download/directory` with your actual settings.
