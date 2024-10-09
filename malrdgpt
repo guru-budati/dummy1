@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# Email settings
+MAIL_SERVER="mail.example.com"
+MAIL_USER="your-email@example.com"
+MAIL_PASS="your-password"
+MAIL_PROTO="IMAP"
+MAIL_FOLDER="INBOX"
+
+# Download directory
+DOWNLOAD_DIR="/path/to/download"
+
+# Fetch mail from server using fetchmail
+fetchmail --protocol $MAIL_PROTO --username $MAIL_USER --password $MAIL_PASS --keep --ssl --folder $MAIL_FOLDER
+
+# Check each mail in the mailbox folder
+MAILBOX="/var/spool/mail/$MAIL_USER"  # Adjust to your server's mailbox path
+
+# Search for new emails
+grep -l "New email" $MAILBOX | while read mailfile; do
+
+    # Extract URLs using grep and regular expression
+    URL=$(grep -Eo '(http|https)://[^ ]+' $mailfile)
+
+    if [[ ! -z "$URL" ]]; then
+        echo "Found URL: $URL"
+        
+        # Download the file from the URL
+        wget -P $DOWNLOAD_DIR "$URL" || curl -O "$URL"
+
+        # Mark email as read (using imapfilter)
+        imapfilter <<EOF
+            options.timeout = 120
+            options.subscribe = true
+            options.certificates = true
+
+            account = IMAP {
+              server = '$MAIL_SERVER',
+              username = '$MAIL_USER',
+              password = '$MAIL_PASS',
+              ssl = 'tls1',
+            }
+
+            messages = account['$MAIL_FOLDER']:is_unseen()
+
+            for _, message in ipairs(messages) do
+                account['$MAIL_FOLDER']:mark_seen(message)
+            end
+EOF
+    fi
+done
+
+echo "Mail processing complete."
