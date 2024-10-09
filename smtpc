@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# Configuration
+MAIL_DIR="$HOME/Maildir/new"  # Adjust to your mail directory
+PROCESSED_DIR="$HOME/Maildir/processed"  # Directory for processed emails
+LOG_FILE="$HOME/processed_emails.log"  # Log of processed emails
+
+# Create processed directory if it doesn't exist
+mkdir -p "$PROCESSED_DIR"
+
+# Function to extract URLs from an email file
+extract_urls() {
+    local email_file="$1"
+    grep -oP '(http|https)://[a-zA-Z0-9./?=_-]*' "$email_file"
+}
+
+# Process new emails
+for email_file in "$MAIL_DIR"/*; do
+    if [[ -f "$email_file" ]]; then
+        echo "Processing email: $email_file"
+
+        # Extract URLs from the email
+        urls=$(extract_urls "$email_file")
+
+        if [[ -n "$urls" ]]; then
+            # Loop through each URL and download the file
+            while IFS= read -r url; do
+                echo "Downloading file from URL: $url"
+                curl -O "$url"  # Use wget if preferred: wget "$url"
+            done <<< "$urls"
+
+            # Mark the email as processed (move to processed directory)
+            mv "$email_file" "$PROCESSED_DIR/"
+            echo "Processed email: $email_file" >> "$LOG_FILE"
+        else
+            echo "No URLs found in email: $email_file"
+        fi
+    fi
+done
+
+echo "Finished processing emails."
