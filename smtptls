@@ -1,36 +1,42 @@
-#!/bin/bash  # Ensure the script uses bash
+#!/bin/bash
 
 # Configuration
 MAIL_SERVER="imap.gmail.com"
+MAIL_PORT="143"  # STARTTLS typically runs on port 143
 MAIL_USER="your-email@gmail.com"
 MAIL_PASS="your-password"
 DOWNLOAD_DIR="/path/to/download"
 
-# Establish connection to the IMAP server using openssl and login
+# Establish connection to the IMAP server using netcat
 imap_command() {
-    openssl s_client -connect $MAIL_SERVER:993 -crlf -quiet -ign_eof <<EOF
-a LOGIN $MAIL_USER $MAIL_PASS
-a SELECT INBOX
-$1
-a LOGOUT
-EOF
+    # Connect to the server and send the commands, followed by STARTTLS
+    (
+        echo "A1 CAPABILITY"
+        sleep 1
+        echo "A2 STARTTLS"
+        sleep 1
+        echo "A3 LOGIN $MAIL_USER $MAIL_PASS"
+        echo "A4 SELECT INBOX"
+        echo "$1"
+        echo "A5 LOGOUT"
+    ) | nc $MAIL_SERVER $MAIL_PORT | openssl s_client -starttls imap
 }
 
 # Fetch unread emails
 fetch_unread_emails() {
-    imap_command "a SEARCH UNSEEN" | grep -o "[0-9]\+"
+    imap_command "A4 SEARCH UNSEEN" | grep -o "[0-9]\+"
 }
 
 # Fetch email body by ID and extract URL
 fetch_email_body() {
     local email_id=$1
-    imap_command "a FETCH $email_id BODY[TEXT]" | grep -Eo '(http|https)://[^ ]+'
+    imap_command "A4 FETCH $email_id BODY[TEXT]" | grep -Eo '(http|https)://[^ ]+'
 }
 
 # Mark email as read by ID
 mark_email_as_read() {
     local email_id=$1
-    imap_command "a STORE $email_id +FLAGS \\Seen"
+    imap_command "A4 STORE $email_id +FLAGS \\Seen"
 }
 
 # Main script loop to process new emails
@@ -44,7 +50,7 @@ process_new_emails() {
         # Extract URL from the email body
         local url=$(fetch_email_body $email_id)
         
-        if [ ! -z "$url" ]; then  # Use single brackets for POSIX compatibility
+        if [ ! -z "$url" ]; then
             echo "Found URL: $url"
             
             # Download file from URL
