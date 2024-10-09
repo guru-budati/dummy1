@@ -1,0 +1,65 @@
+#!/bin/bash
+
+# Configuration
+MAIL_SERVER="imap.example.com"
+MAIL_USER="your-email@example.com"
+MAIL_PASS="your-password"
+MAIL_FOLDER="INBOX"
+DOWNLOAD_DIR="/path/to/download"
+
+# Establish connection to the IMAP server using openssl and login
+imap_command() {
+    openssl s_client -connect $MAIL_SERVER:993 -crlf -quiet <<EOF
+a LOGIN $MAIL_USER $MAIL_PASS
+a SELECT $MAIL_FOLDER
+$1
+a LOGOUT
+EOF
+}
+
+# Fetch unread emails
+fetch_unread_emails() {
+    imap_command "a SEARCH UNSEEN" | grep -o "[0-9]\+"
+}
+
+# Fetch email body by ID and extract URL
+fetch_email_body() {
+    local email_id=$1
+    imap_command "a FETCH $email_id BODY[TEXT]" | grep -Eo '(http|https)://[^ ]+'
+}
+
+# Mark email as read by ID
+mark_email_as_read() {
+    local email_id=$1
+    imap_command "a STORE $email_id +FLAGS \\Seen"
+}
+
+# Main script loop to process new emails
+process_new_emails() {
+    # Get list of unread email IDs
+    local email_ids=$(fetch_unread_emails)
+    
+    for email_id in $email_ids; do
+        echo "Processing email ID: $email_id"
+        
+        # Extract URL from the email body
+        local url=$(fetch_email_body $email_id)
+        
+        if [[ ! -z "$url" ]]; then
+            echo "Found URL: $url"
+            
+            # Download file from URL
+            wget -P $DOWNLOAD_DIR "$url" || curl -O "$url"
+            
+            # Mark the email as read
+            mark_email_as_read $email_id
+        fi
+    done
+}
+
+# Run the script once or in a loop
+while true; do
+    process_new_emails
+    echo "Sleeping for 60 seconds..."
+    sleep 60
+done
