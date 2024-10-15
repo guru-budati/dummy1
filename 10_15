@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# Login to the email account using the stored credentials
+openssl s_client -connect imap.gmail.com:993 -crlf -quiet <<EOF | tee email.log
+a LOGIN testmeme134@gmail.com your-app-password
+a SELECT INBOX
+a SEARCH RECENT
+EOF
+
+# Check if there are any new emails
+new_emails=$(grep -o 'SEARCH [0-9]' email.log)
+
+if [[ -z "$new_emails" ]]; then
+  echo "No new mails."
+  exit 0
+fi
+
+# Extract the email IDs of the new mails
+email_ids=$(grep -oP '(?<=SEARCH )\d+' email.log)
+
+for email_id in $email_ids; do
+  echo "Processing email ID: $email_id"
+  
+  # Fetch the email body (or attachment URL)
+  openssl s_client -connect imap.gmail.com:993 -crlf -quiet <<EOF | tee email_body.log
+  a LOGIN testmeme134@gmail.com your-app-password
+  a FETCH $email_id BODY[TEXT]
+  EOF
+
+  # Extract URL from the email body and download the file
+  url=$(grep -oP '(http|https)://[^\s]+' email_body.log | head -n 1)
+  
+  if [[ -n "$url" ]]; then
+    echo "Found URL: $url"
+    wget -P /home/ubuntu/Downloads "$url"
+  else
+    echo "No URL found in email ID: $email_id"
+  fi
+done
