@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# Define login credentials (adjust for the new server)
+email_address="your-email@myserver.com"
+password="your-password"
+
+# Folder to save downloads
+download_dir="/home/ubuntu/Downloads"
+
+# Create download directory if it doesn't exist
+mkdir -p "$download_dir"
+
+# Log in to the email account and check for new mails using IMAP (adjust server address)
+openssl s_client -connect imap.myserver.com:993 -crlf -quiet <<EOF | tee email.log
+a LOGIN $email_address $password
+a SELECT INBOX
+a SEARCH RECENT
+EOF
+
+# Check if there are any new emails
+new_emails=$(grep -o 'SEARCH [0-9]' email.log)
+
+if [[ -z "$new_emails" ]]; then
+  echo "No new mails."
+  exit 0
+fi
+
+# Extract the email IDs of the new mails
+email_ids=$(grep -oP '(?<=SEARCH )\d+' email.log)
+
+# Process each new email
+for email_id in $email_ids; do
+  echo "Processing email ID: $email_id"
+
+  # Fetch the email body (which may contain the URL)
+  openssl s_client -connect imap.myserver.com:993 -crlf -quiet <<EOF | tee email_body.log
+  a LOGIN $email_address $password
+  a FETCH $email_id BODY[TEXT]
+  EOF
+
+  # Extract URL from the email body
+  url=$(grep -oP '(http|https)://[^\s]+' email_body.log | head -n 1)
+
+  if [[ -n "$url" ]]; then
+    echo "Found URL: $url"
+    # Download the file using wget
+    wget -P "$download_dir" "$url"
+  else
+    echo "No URL found in email ID: $email_id"
+  fi
+
+done
+
+# Mark emails as read after processing
+openssl s_client -connect imap.myserver.com:993 -crlf -quiet <<EOF
+a LOGIN $email_address $password
+a STORE $email_id +FLAGS \Seen
+a LOGOUT
+EOF
+
+echo "Script completed."
