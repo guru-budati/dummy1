@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Variables
+MAIL_FILE="/var/mail/$(whoami)"  # Path to the user's mail file
+OUTPUT_FILE="$HOME/collected_mails.txt"  # Output file to store mail contents
+TEMP_FILE="$HOME/temp_mail.txt"  # Temporary file for processing
+
+# Check if mail file exists
+if [ ! -f "$MAIL_FILE" ]; then
+    echo "Mail file does not exist."
+    exit 1
+fi
+
+# Check for new mails (non-empty file)
+if [ ! -s "$MAIL_FILE" ]; then
+    echo "No new mail."
+    exit 0
+fi
+
+# Copy contents of the mail file to a temporary file
+cat "$MAIL_FILE" > "$TEMP_FILE"
+
+# Append the contents of the temporary file to the output file
+cat "$TEMP_FILE" >> "$OUTPUT_FILE"
+
+# Clear the temporary file
+echo "" > "$TEMP_FILE"
+
+# Output message
+echo "Mail contents copied to $OUTPUT_FILE."
+
+# Optionally, you can delete the mail file after processing
+# Uncomment the following line if you want to remove mails after processing
+# > "$MAIL_FILE"
+
+exit 0
