@@ -1,0 +1,86 @@
+#!/bin/bash
+
+# Variables
+MAIL_FILE="/var/mail/$(whoami)"  # Path to the mail file of the current user
+OUTPUT_DIR="/tmp"                  # Directory to save the downloaded file
+URL_FILE="/tmp/extracted_url.txt"  # File to store the extracted URL
+TIMESTAMP_FILE="/tmp/last_timestamp.txt"  # File to store the last processed timestamp
+LAST_PROCESSED_TIMESTAMP="1970-01-01 00:00:00"  # Default initial timestamp (Unix epoch)
+
+# Step 1: Check if the mail file exists
+if [ ! -f "$MAIL_FILE" ]; then
+    echo "Mail file does not exist."
+    exit 1
+fi
+
+# Step 2: Create the timestamp file if it doesn't exist
+if [ ! -f "$TIMESTAMP_FILE" ]; then
+    echo "$LAST_PROCESSED_TIMESTAMP" > "$TIMESTAMP_FILE"
+fi
+
+# Step 3: Read the last processed timestamp
+LAST_PROCESSED_TIMESTAMP=$(cat "$TIMESTAMP_FILE")
+
+# Step 4: Get the current time for comparison
+CURRENT_TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+
+# Step 5: Initialize a variable to track if new mail is found
+new_mail_found=false
+
+# Step 6: Read the mail file and check for new emails based on timestamp
+while IFS= read -r line; do
+    # Extract the timestamp from the mail (assumed to be in the format: Date: <timestamp>)
+    email_timestamp=$(echo "$line" | grep -i "^Date:" | awk -F': ' '{print $2}' | sed 's/ +0000//')
+
+    # Convert to comparable format
+    email_timestamp_seconds=$(date -d "$email_timestamp" +%s)
+    last_processed_seconds=$(date -d "$LAST_PROCESSED_TIMESTAMP" +%s)
+
+    # Check if the email timestamp is more recent than the last processed timestamp
+    if [ "$email_timestamp_seconds" -gt "$last_processed_seconds" ]; then
+        new_mail_found=true
+        echo "New mail found with timestamp: $email_timestamp"
+
+        # Extract the body of the new mail
+        mail_body=$(echo "$line")
+
+        # Step 7: Extract URL from the mail body
+        echo "$mail_body" | grep -o 'http[s]\?://[^ ]*' > "$URL_FILE"
+
+        # Step 8: Check if any URL was found
+        if [ ! -s "$URL_FILE" ]; then
+            echo "No URL found in the mail."
+            continue
+        fi
+
+        # Step 9: Read the URL from the file
+        URL=$(cat "$URL_FILE")
+        echo "Extracted URL: $URL"
+
+        # Step 10: Download the file from the URL
+        FILE_NAME=$(basename "$URL")  # Extract the file name from the URL
+        OUTPUT_PATH="$OUTPUT_DIR/$FILE_NAME"  # Set the output path for the downloaded file
+
+        # Download the file using curl
+        curl -o "$OUTPUT_PATH" "$URL"
+
+        # Step 11: Check if the file was downloaded successfully
+        if [ -f "$OUTPUT_PATH" ]; then
+            echo "File downloaded successfully to $OUTPUT_PATH."
+        else
+            echo "Failed to download the file."
+            continue
+        fi
+    fi
+done < "$MAIL_FILE"
+
+# Step 12: Update the timestamp file with the current timestamp
+if [ "$new_mail_found" = true ]; then
+    echo "$CURRENT_TIMESTAMP" > "$TIMESTAMP_FILE"
+else
+    echo "No new mails found."
+    # Save the current timestamp to the timestamp file even if no new mails are found
+    echo "$CURRENT_TIMESTAMP" > "$TIMESTAMP_FILE"
+fi
+
+echo "Processing complete."
