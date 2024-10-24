@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# Variables
+MAIL_FILE="/var/mail/$(whoami)"  # Path to the mail file of the current user
+TEMP_MAIL="/tmp/temp_mail.txt"    # Temporary file to process the mail
+OUTPUT_DIR="/tmp"                  # Directory to save the downloaded file
+URL_FILE="/tmp/extracted_url.txt"  # File to store the extracted URL
+PROCESSED_MAILS="/tmp/processed_mails.txt"  # Track processed email IDs
+
+# Step 1: Check if the mail file exists
+if [ ! -f "$MAIL_FILE" ]; then
+    echo "Mail file does not exist."
+    exit 1
+fi
+
+# Step 2: Create the processed mails file if it doesn't exist
+touch "$PROCESSED_MAILS"
+
+# Step 3: Read the list of processed email IDs
+readarray -t processed_ids < "$PROCESSED_MAILS"
+
+# Step 4: Extract new email IDs (assuming they're numbered)
+new_mail_ids=()
+while IFS= read -r line; do
+    mail_id=$(echo "$line" | awk '{print $1}')  # Get the email ID
+    if [[ ! " ${processed_ids[@]} " =~ " ${mail_id} " ]]; then
+        new_mail_ids+=("$mail_id")
+    fi
+done < <(cat "$MAIL_FILE")
+
+# Step 5: Check if there are new mails to process
+if [ ${#new_mail_ids[@]} -eq 0 ]; then
+    echo "No new mails to process."
+    exit 0
+fi
+
+# Step 6: Process each new mail
+for mail_id in "${new_mail_ids[@]}"; do
+    # Extract the body of the new mail
+    mail_body=$(sed -n "${mail_id}p" "$MAIL_FILE")
+
+    # Step 7: Extract URL from the mail body
+    echo "$mail_body" | grep -o 'http[s]\?://[^ ]*' > "$URL_FILE"
+
+    # Step 8: Check if any URL was found
+    if [ ! -s "$URL_FILE" ]; then
+        echo "No URL found in mail ID: $mail_id."
+        continue
+    fi
+
+    # Step 9: Read the URL from the file
+    URL=$(cat "$URL_FILE")
+    echo "Extracted URL from mail ID $mail_id: $URL"
+
+    # Step 10: Download the file from the URL
+    FILE_NAME=$(basename "$URL")  # Extract the file name from the URL
+    OUTPUT_PATH="$OUTPUT_DIR/$FILE_NAME"  # Set the output path for the downloaded file
+
+    # Download the file using curl
+    curl -o "$OUTPUT_PATH" "$URL"
+
+    # Step 11: Check if the file was downloaded successfully
+    if [ -f "$OUTPUT_PATH" ]; then
+        echo "File downloaded successfully to $OUTPUT_PATH."
+    else
+        echo "Failed to download the file from mail ID: $mail_id."
+        continue
+    fi
+
+    # Step 12: Log the processed mail ID
+    echo "$mail_id" >> "$PROCESSED_MAILS"
+done
+
+echo "Processing complete."
