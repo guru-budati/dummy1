@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# Configuration Variables
+LAST_PROCESSED_FILE="/path/to/last_processed_timestamp.txt"  # File to store the timestamp of the last processed email check
+DOWNLOAD_DIR="/path/to/download/folder"                      # Directory where downloaded files are stored
+IMAP_SERVER="imap.gmail.com"                                 # IMAP server address
+IMAP_PORT=993                                                # IMAP server port
+EMAIL="your-email@gmail.com"                                 # Your email address
+PASSWORD="your-password"                                     # Your email password
+
+# 1. Initialize the last processed timestamp if the file doesn't exist
+if [[ ! -f $LAST_PROCESSED_FILE ]]; then
+    echo "1970-01-01T00:00:00Z" > "$LAST_PROCESSED_FILE"  # Sets to epoch start date if no previous timestamp found
+fi
+
+# 2. Read the last processed timestamp
+LAST_PROCESSED_TIMESTAMP=$(cat "$LAST_PROCESSED_FILE")  # Reads the timestamp from file for comparison
+# Converts the timestamp to a date format suitable for IMAP 'SEARCH' command
+LAST_PROCESSED_DATE=$(date -d "$LAST_PROCESSED_TIMESTAMP" +"%d-%b-%Y")
+
+# 3. Open IMAP connection and search for new emails since the last processed timestamp
+NEW_EMAILS=$(openssl s_client -crlf -quiet -connect "$IMAP_SERVER:$IMAP_PORT" <<EOF | grep "UID" | awk '{print $3}'
+a LOGIN "$EMAIL" "$PASSWORD"
+a SELECT INBOX
+a SEARCH SINCE "$LAST_PROCESSED_DATE"  # Searches for emails received since the last processed date
+a LOGOUT
+EOF
+)
+
+# 4. Check if there are new emails
+if [[ -z "$NEW_EMAILS" ]]; then
+    echo "No new mails."  # No new emails found, exit the script
+else
+    echo "New emails detected."
+
+    # 5. Loop through each new email ID
+    for EMAIL_ID in $NEW_EMAILS; do
+        # 6. Fetch the email body for each email ID to search for URLs
+        EMAIL_BODY=$(openssl s_client -crlf -quiet -connect "$IMAP_SERVER:$IMAP_PORT" <<EOF | sed -n '/^Content-Transfer-Encoding/,/^--/p'
+a LOGIN "$EMAIL" "$PASSWORD"
+a FETCH $EMAIL_ID BODY[TEXT]  # Fetches the body of the email with ID $EMAIL_ID
+a LOGOUT
+EOF
+        )
+
+        # 7. Extract URLs from the email body
+        URLS=$(echo "$EMAIL_BODY" | grep -Eo '(http|https)://[^ ]+')  # Extracts URLs using regular expressions
+
+        # 8. Download each URL found in the email
+        for URL in $URLS; do
+            wget -P "$DOWNLOAD_DIR" "$URL"  # Downloads the file to specified directory
+        done
+    done
+fi
+
+# 9. Update the last processed timestamp with the current time
+date -u +"%Y-%m-%dT%H:%M:%SZ" > "$LAST_PROCESSED_FILE"  # Saves the current timestamp for next script run
