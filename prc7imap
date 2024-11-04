@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# Define variables
+IMAP_SERVER="imap.gmail.com"
+IMAP_PORT="993"
+EMAIL="your_email@gmail.com"
+PASSWORD="your_password"
+TIMESTAMP_FILE="/path/to/timestamp_file"
+DOWNLOAD_DIR="/path/to/download_dir"
+DEBUG_LOG="/path/to/debug.log"
+
+# Initialize the last processed timestamp
+if [[ ! -f "$TIMESTAMP_FILE" ]]; then
+    echo "0" > "$TIMESTAMP_FILE"
+fi
+
+# Read last processed timestamp
+LAST_TIMESTAMP=$(cat "$TIMESTAMP_FILE")
+
+# Connect to IMAP and check for new emails
+{
+    openssl s_client -connect "$IMAP_SERVER:$IMAP_PORT" -crlf -quiet <<EOF
+a LOGIN "$EMAIL" "$PASSWORD"
+a SELECT INBOX
+a SEARCH SINCE "$LAST_TIMESTAMP"
+EOF
+} &> "$DEBUG_LOG"
+
+# Parse new emails
+if grep -q "SEARCH completed" "$DEBUG_LOG"; then
+    # Fetch new email IDs
+    EMAIL_IDS=$(grep "SEARCH" "$DEBUG_LOG" | sed 's/^* SEARCH //')
+
+    if [[ -z "$EMAIL_IDS" ]]; then
+        echo "No new mails."
+        echo "$(date +%s)" > "$TIMESTAMP_FILE"
+        exit 0
+    fi
+
+    for ID in $EMAIL_IDS; do
+        {
+            openssl s_client -connect "$IMAP_SERVER:$IMAP_PORT" -crlf -quiet <<EOF
+a LOGIN "$EMAIL" "$PASSWORD"
+a SELECT INBOX
+a FETCH $ID BODY[TEXT]
+EOF
+        } &>> "$DEBUG_LOG"
+
+        # Extract URL from email body
+        URL=$(grep -Eo '(http|https)://[^ ]+' "$DEBUG_LOG" | head -1)
+        
+        if [[ -n "$URL" ]]; then
+            # Download the file
+            wget -P "$DOWNLOAD_DIR" "$URL"
+        fi
+
+        # Mark email as read
+        {
+            openssl s_client -connect "$IMAP_SERVER:$IMAP_PORT" -crlf -quiet <<EOF
+a LOGIN "$EMAIL" "$PASSWORD"
+a SELECT INBOX
+a STORE $ID +FLAGS (\Seen)
+EOF
+        } &>> "$DEBUG_LOG"
+
+    done
+
+    # Update timestamp
+    echo "$(date +%s)" > "$TIMESTAMP_FILE"
+
+else
+    echo "Error processing emails."
+    cat "$DEBUG_LOG"
+fi
