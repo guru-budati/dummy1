@@ -1,0 +1,78 @@
+#!/bin/bash
+
+# Define variables
+IMAP_SERVER="imap.gmail.com"
+IMAP_PORT="993"
+EMAIL="your_email@gmail.com"
+PASSWORD="your_password"
+TIMESTAMP_FILE="/path/to/timestamp_file"
+DOWNLOAD_DIR="/path/to/download_dir"
+DEBUG_LOG="/path/to/debug.log"
+
+# Initialize the timestamp file if it doesn't exist, set to default value (yesterday's date)
+if [[ ! -f "$TIMESTAMP_FILE" ]]; then
+    date -u -d "yesterday" +"%s" > "$TIMESTAMP_FILE"
+fi
+
+# Read the last processed timestamp in UNIX format
+LAST_TIMESTAMP=$(cat "$TIMESTAMP_FILE")
+
+# If the timestamp is still 0, set LAST_DATE to a default date (e.g., yesterday)
+if [[ "$LAST_TIMESTAMP" -eq 0 ]]; then
+    LAST_DATE=$(date -u -d "yesterday" +"%d-%b-%Y")
+else
+    LAST_DATE=$(date -u -d @"$LAST_TIMESTAMP" +"%d-%b-%Y")
+fi
+
+# Connect to IMAP and check for new emails since LAST_DATE
+{
+    openssl s_client -connect "$IMAP_SERVER:$IMAP_PORT" -crlf -quiet <<EOF
+a LOGIN "$EMAIL" "$PASSWORD"
+a SELECT INBOX
+a SEARCH SINCE "$LAST_DATE"
+EOF
+} &> "$DEBUG_LOG"
+
+# Parse new emails
+if grep -q "SEARCH" "$DEBUG_LOG"; then
+    EMAIL_IDS=$(grep "SEARCH" "$DEBUG_LOG" | sed 's/^* SEARCH //')
+
+    if [[ -z "$EMAIL_IDS" ]]; then
+        echo "No new mails."
+        date +%s > "$TIMESTAMP_FILE"  # Update timestamp even if no new mails
+        exit 0
+    fi
+
+    for ID in $EMAIL_IDS; do
+        {
+            openssl s_client -connect "$IMAP_SERVER:$IMAP_PORT" -crlf -quiet <<EOF
+a LOGIN "$EMAIL" "$PASSWORD"
+a SELECT INBOX
+a FETCH $ID BODY[TEXT]
+EOF
+        } &>> "$DEBUG_LOG"
+
+        # Extract URL from email body
+        URL=$(grep -Eo '(http|https)://[^ ]+' "$DEBUG_LOG" | head -1)
+        
+        if [[ -n "$URL" ]]; then
+            # Download the file
+            wget -P "$DOWNLOAD_DIR" "$URL"
+        fi
+
+        # Mark email as read
+        {
+            openssl s_client -connect "$IMAP_SERVER:$IMAP_PORT" -crlf -quiet <<EOF
+a LOGIN "$EMAIL" "$PASSWORD"
+a SELECT INBOX
+a STORE $ID +FLAGS (\Seen)
+EOF
+        } &>> "$DEBUG_LOG"
+    done
+
+    # Update timestamp after processing emails
+    date +%s > "$TIMESTAMP_FILE"
+else
+    echo "Error processing emails."
+    cat "$DEBUG_LOG"
+fi
