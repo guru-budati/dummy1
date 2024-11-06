@@ -1,0 +1,80 @@
+#!/bin/bash
+
+# Define variables
+IMAP_SERVER="imap.gmail.com"
+IMAP_PORT="993"
+EMAIL="your_email@gmail.com"
+PASSWORD="your_password"
+TIMESTAMP_FILE="/path/to/timestamp_file"
+DOWNLOAD_DIR="/path/to/download_dir"
+DEBUG_LOG="/path/to/debug.log"
+
+# Initialize the timestamp file if it doesn't exist, set to a default value (yesterday's date)
+if [[ ! -f "$TIMESTAMP_FILE" ]]; then
+    date -u -d "yesterday" +"%s" > "$TIMESTAMP_FILE"
+fi
+
+# Read the last processed timestamp
+LAST_TIMESTAMP=$(cat "$TIMESTAMP_FILE" 2>/dev/null)
+
+# Validate LAST_TIMESTAMP to ensure it’s numeric; otherwise, default it to yesterday’s timestamp
+if ! [[ "$LAST_TIMESTAMP" =~ ^[0-9]+$ ]]; then
+    LAST_TIMESTAMP=$(date -u -d "yesterday" +"%s")
+    echo "$LAST_TIMESTAMP" > "$TIMESTAMP_FILE"
+fi
+
+# Convert LAST_TIMESTAMP to IMAP date format (DD-MMM-YYYY)
+LAST_DATE=$(date -u -d @"$LAST_TIMESTAMP" +"%d-%b-%Y")
+
+# Connect to IMAP and check for new emails since LAST_DATE
+{
+    openssl s_client -connect "$IMAP_SERVER:$IMAP_PORT" -crlf -quiet <<EOF
+a LOGIN "$EMAIL" "$PASSWORD"
+a SELECT INBOX
+a SEARCH SINCE "$LAST_DATE"
+EOF
+} &> "$DEBUG_LOG"
+
+# Parse new emails
+if grep -q "SEARCH" "$DEBUG_LOG"; then
+    EMAIL_IDS=$(grep "SEARCH" "$DEBUG_LOG" | sed 's/^* SEARCH //')
+
+    if [[ -z "$EMAIL_IDS" ]]; then
+        echo "No new mails."
+        date +%s > "$TIMESTAMP_FILE"  # Update timestamp even if no new mails
+        exit 0
+    fi
+
+    for ID in $EMAIL_IDS; do
+        {
+            openssl s_client -connect "$IMAP_SERVER:$IMAP_PORT" -crlf -quiet <<EOF
+a LOGIN "$EMAIL" "$PASSWORD"
+a SELECT INBOX
+a FETCH $ID BODY[TEXT]
+EOF
+        } &>> "$DEBUG_LOG"
+
+        # Extract URL from email body
+        URL=$(grep -Eo '(http|https)://[^ ]+' "$DEBUG_LOG" | head -1)
+        
+        if [[ -n "$URL" ]]; then
+            # Download the file
+            wget -P "$DOWNLOAD_DIR" "$URL"
+        fi
+
+        # Mark email as read
+        {
+            openssl s_client -connect "$IMAP_SERVER:$IMAP_PORT" -crlf -quiet <<EOF
+a LOGIN "$EMAIL" "$PASSWORD"
+a SELECT INBOX
+a STORE $ID +FLAGS (\Seen)
+EOF
+        } &>> "$DEBUG_LOG"
+    done
+
+    # Update timestamp after processing emails
+    date +%s > "$TIMESTAMP_FILE"
+else
+    echo "Error processing emails."
+    cat "$DEBUG_LOG"
+fi
