@@ -9,26 +9,28 @@ TIMESTAMP_FILE="/path/to/timestamp_file"
 DOWNLOAD_DIR="/path/to/download_dir"
 DEBUG_LOG="/path/to/debug.log"
 
-# Initialize the last processed timestamp
+# Initialize the last processed timestamp file if it doesn't exist
 if [[ ! -f "$TIMESTAMP_FILE" ]]; then
     echo "0" > "$TIMESTAMP_FILE"
 fi
 
-# Read last processed timestamp
+# Read the last processed timestamp in UNIX format
 LAST_TIMESTAMP=$(cat "$TIMESTAMP_FILE")
 
-# Connect to IMAP and check for new emails
+# Convert UNIX timestamp to required IMAP date format
+LAST_DATE=$(date -u -d @"$LAST_TIMESTAMP" +"%d-%b-%Y")
+
+# Connect to IMAP and check for new emails since LAST_DATE
 {
     openssl s_client -connect "$IMAP_SERVER:$IMAP_PORT" -crlf -quiet <<EOF
 a LOGIN "$EMAIL" "$PASSWORD"
 a SELECT INBOX
-a SEARCH SINCE "$LAST_TIMESTAMP"
+a SEARCH SINCE "$LAST_DATE"
 EOF
 } &> "$DEBUG_LOG"
 
 # Parse new emails
-if grep -q "SEARCH completed" "$DEBUG_LOG"; then
-    # Fetch new email IDs
+if grep -q "SEARCH" "$DEBUG_LOG"; then
     EMAIL_IDS=$(grep "SEARCH" "$DEBUG_LOG" | sed 's/^* SEARCH //')
 
     if [[ -z "$EMAIL_IDS" ]]; then
@@ -62,12 +64,10 @@ a SELECT INBOX
 a STORE $ID +FLAGS (\Seen)
 EOF
         } &>> "$DEBUG_LOG"
-
     done
 
-    # Update timestamp
+    # Update timestamp after processing emails
     echo "$(date +%s)" > "$TIMESTAMP_FILE"
-
 else
     echo "Error processing emails."
     cat "$DEBUG_LOG"
